@@ -69,7 +69,37 @@ async def call_openrouter(prompt: str) -> str:
                 return data["choices"][0]["message"]["content"]
     return None
 
+# ======================== VENICE.AI (YENİ) ========================
+async def call_venice(prompt: str) -> str | None:
+    api_key = "VENICE_INFERENCE_KEY_SCD-lbhIi0GiEZGhQLklhdtHN_6lDeXebLBuTnEd0-"  # Buraya kendi anahtarınızı girin
+    if not api_key:
+        return None
+    url = "https://api.venice.ai/api/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "model": "venice-uncensored",
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.7,
+        "max_tokens": 4096
+    }
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, headers=headers, json=payload, timeout=30) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                if "choices" in data and data["choices"]:
+                    return data["choices"][0]["message"]["content"]
+            else:
+                logger.warning(f"Venice API Hatası: {resp.status} - {await resp.text()}")
+                return None
+
+# ======================== ANA ASİSTAN (YÖNLENDİRİCİ) ========================
 async def ask_ai(prompt: str, preferred: str = None) -> str:
+    if preferred == "venice":
+        res = await call_venice(prompt)
+        if res: return res
     if preferred == "groq":
         res = await call_groq(prompt)
         if res: return res
@@ -79,6 +109,7 @@ async def ask_ai(prompt: str, preferred: str = None) -> str:
     if preferred == "openrouter":
         res = await call_openrouter(prompt)
         if res: return res
+    # Fallback: Pollinations her zaman çalışır
     return await call_pollinations(prompt)
 
 # ======================== TELEGRAM KOMUTLARI ========================
@@ -89,6 +120,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• `/setai groq` - Groq (hızlı)\n"
         "• `/setai gemini` - Google Gemini\n"
         "• `/setai openrouter` - OpenRouter (Llama 3.3)\n"
+        "• `/setai venice` - Venice.ai (uncensored)\n"
         "• `/setai pollinations` - Pollinations (yedek)\n\n"
         "🎨 *Görsel üretmek için:*\n"
         "• `/image <açıklama>` - Örn: `/image kırmızı elma ağaçta`\n\n"
@@ -98,10 +130,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def set_ai(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text("Kullanım: `/setai <groq|gemini|openrouter|pollinations>`")
+        await update.message.reply_text("Kullanım: `/setai <groq|gemini|openrouter|venice|pollinations>`")
         return
     choice = context.args[0].lower()
-    valid = ["groq", "gemini", "openrouter", "pollinations"]
+    valid = ["groq", "gemini", "openrouter", "venice", "pollinations"]
     if choice not in valid:
         await update.message.reply_text(f"Geçersiz. Geçerli: {', '.join(valid)}")
         return
@@ -144,7 +176,7 @@ def main():
     app.add_handler(CommandHandler("setai", set_ai))
     app.add_handler(CommandHandler("image", image_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    print("✅ Bot çalışıyor! /start ile başla, /image ile görsel üret.")
+    print("✅ Bot çalışıyor! /start ile başla, /image ile görsel üret. Venice.ai eklendi.")
     app.run_polling()
 
 if __name__ == "__main__":

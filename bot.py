@@ -69,9 +69,9 @@ async def call_openrouter(prompt: str) -> str:
                 return data["choices"][0]["message"]["content"]
     return None
 
-# ======================== VENICE.AI (YENİ) ========================
-async def call_venice(prompt: str) -> str | None:
-    api_key = "VENICE_INFERENCE_KEY_SCD-lbhIi0GiEZGhQLklhdtHN_6lDeXebLBuTnEd0-"  # Buraya kendi anahtarınızı girin
+# ======================== VENICE.AI (EKLENDİ) ========================
+async def call_venice(prompt: str) -> str:
+    api_key = "VENICE_INFERENCE_KEY_eqIm54tblIewJQ84MaIXwb5qYia_QOEzHLiOhrMP_N"
     if not api_key:
         return None
     url = "https://api.venice.ai/api/v1/chat/completions"
@@ -89,17 +89,14 @@ async def call_venice(prompt: str) -> str | None:
         async with session.post(url, headers=headers, json=payload, timeout=30) as resp:
             if resp.status == 200:
                 data = await resp.json()
+                # Venice yanıtı OpenAI formatında
                 if "choices" in data and data["choices"]:
                     return data["choices"][0]["message"]["content"]
-            else:
-                logger.warning(f"Venice API Hatası: {resp.status} - {await resp.text()}")
-                return None
+            logger.warning(f"Venice API hatası: {resp.status}")
+            return None
 
-# ======================== ANA ASİSTAN (YÖNLENDİRİCİ) ========================
+# ======================== ANA SOHBET YÖNLENDİRİCİ ========================
 async def ask_ai(prompt: str, preferred: str = None) -> str:
-    if preferred == "venice":
-        res = await call_venice(prompt)
-        if res: return res
     if preferred == "groq":
         res = await call_groq(prompt)
         if res: return res
@@ -109,13 +106,16 @@ async def ask_ai(prompt: str, preferred: str = None) -> str:
     if preferred == "openrouter":
         res = await call_openrouter(prompt)
         if res: return res
-    # Fallback: Pollinations her zaman çalışır
+    if preferred == "venice":
+        res = await call_venice(prompt)
+        if res: return res
+    # Yedek olarak Pollinations
     return await call_pollinations(prompt)
 
 # ======================== TELEGRAM KOMUTLARI ========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🤖 *Çoklu AI Asistanı + Görsel Üretim*\n\n"
+        "🤖 *Çoklu AI Asistanı + Görsel Üretim + Venice*\n\n"
         "📝 *Sohbet için:*\n"
         "• `/setai groq` - Groq (hızlı)\n"
         "• `/setai gemini` - Google Gemini\n"
@@ -161,14 +161,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_chat_action(action="typing")
     try:
         response = await ask_ai(prompt, preferred)
-        await update.message.reply_text(response[:4096])
+        # Mesaj gönderimi sırasında oluşabilecek "Message to be replied not found" hatasını engellemek için
+        # doğrudan send_message kullanıyoruz. reply_text bazen sorun çıkarabiliyor.
+        await context.bot.send_message(chat_id=update.effective_chat.id, text=response[:4096])
     except Exception as e:
-        await update.message.reply_text(f"Sohbet hatası: {str(e)}\nYedek AI kullanılıyor...")
+        logger.error(f"Sohbet hatası: {e}")
         try:
-            response = await call_pollinations(prompt)
-            await update.message.reply_text(response[:4096])
-        except:
-            await update.message.reply_text("Şu anda cevap veremiyorum. Lütfen daha sonra tekrar dene.")
+            # Yedek olarak Pollinations'ı dene
+            fallback_response = await call_pollinations(prompt)
+            await context.bot.send_message(chat_id=update.effective_chat.id, text=f"⚠️ Yedek AI (Pollinations) yanıtı:\n{fallback_response[:4096]}")
+        except Exception as fallback_error:
+            await context.bot.send_message(chat_id=update.effective_chat.id, text="❌ Şu anda cevap veremiyorum. Lütfen daha sonra tekrar deneyin.")
 
 def main():
     app = Application.builder().token(TELEGRAM_TOKEN).build()
@@ -176,7 +179,7 @@ def main():
     app.add_handler(CommandHandler("setai", set_ai))
     app.add_handler(CommandHandler("image", image_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    print("✅ Bot çalışıyor! /start ile başla, /image ile görsel üret. Venice.ai eklendi.")
+    print("✅ Bot çalışıyor! /start ile başla, /image ile görsel üret.")
     app.run_polling()
 
 if __name__ == "__main__":
